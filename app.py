@@ -1,93 +1,278 @@
 # app.py
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
-# --- Page setup ---
-st.set_page_config(page_title="Dengue Risk Analysis", layout="wide")
-st.title("Dengue Risk Analysis Dashboard")
+# ------------------------------------------------
+# PAGE CONFIG
+# ------------------------------------------------
+st.set_page_config(
+    page_title="Dengue Outbreak Analytics",
+    page_icon="🦟",
+    layout="wide"
+)
 
-# --- Load dataset ---
-@st.cache_data
-def load_data(path="clean_dengue_india_regions2.csv"):
-    try:
-        df = pd.read_csv(path)
-    except Exception as e:
-        st.error(f"Error loading dataset: {e}")
-        return pd.DataFrame()
-    return df
+# ------------------------------------------------
+# STYLE + NEUTRAL EARTHY GRADIENT BACKGROUND
+# ------------------------------------------------
+st.markdown("""
+<style>
+/* Full-page neutral earthy gradient background */
+[data-testid="stAppViewContainer"] {
+    background: linear-gradient(160deg, #fdf6e3 0%, #f5f0e6 50%, #efe6db 100%);
+    background-attachment: fixed;
+}
 
-df = load_data()
+/* Dashboard title and subtitle */
+.main-title{
+    font-size:42px;
+    font-weight:700;
+    color:#5c3d2e;
+}
+.subtitle{
+    color:#7a5a48;
+    margin-bottom:30px;
+}
 
-if df.empty:
-    st.warning("Dataset is empty or could not be loaded.")
+/* Metrics cards styling */
+div[data-testid="stMetric"]{
+    background-color:rgba(255,250,240,0.95);
+    border-radius:12px;
+    padding:10px;
+    box-shadow:0px 2px 6px rgba(0,0,0,0.1);
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------
+# HEADER + MOSQUITO GIF NEXT TO TITLE
+# ------------------------------------------------
+gif_url = "https://raw.githubusercontent.com/karleaabha-byte/dengue_interactive/refs/heads/main/mosquito.gif"
+col1, col2 = st.columns([1, 5])
+with col1:
+    st.image(gif_url, width=120)
+with col2:
+    st.markdown('<div class="main-title">Dengue Outbreak Dynamics Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle">Stochastic Analysis and Prediction of Dengue Cases</div>', unsafe_allow_html=True)
+
+# ------------------------------------------------
+# LOAD DATA
+# ------------------------------------------------
+df = pd.read_csv("clean_dengue_india_regions2.csv")
+df["Year"] = pd.to_numeric(df["Year"], errors="coerce")
+df["Cases"] = pd.to_numeric(df["Cases"], errors="coerce")
+df = df.dropna()
+
+# ------------------------------------------------
+# SIDEBAR CONTROLS
+# ------------------------------------------------
+st.sidebar.header("Controls")
+regions = sorted(df["Region"].unique())
+region = st.sidebar.selectbox("Select Region", regions)
+data = df[df["Region"] == region].sort_values("Year")
+
+simulations = st.sidebar.slider("Monte Carlo Simulations", 50, 500, 200)
+noise_std = st.sidebar.slider("Random Noise Std Dev", 0.01, 0.2, 0.05)
+
+# ------------------------------------------------
+# GROWTH RATE
+# ------------------------------------------------
+data["growth"] = data["Cases"].pct_change()
+growth = data["growth"].replace([np.inf, -np.inf], np.nan).dropna()
+avg_growth = growth.median() if len(growth) > 0 else 0
+
+# ------------------------------------------------
+# LYAPUNOV EXPONENT
+# ------------------------------------------------
+st.header("Lyapunov Stability Analysis")
+st.latex(r"\lambda = mean(\log(1 + growth))")
+growth_clean = growth[growth > -0.99]
+lyapunov = np.mean(np.log(1 + growth_clean)) if len(growth_clean) > 0 else 0
+
+# ------------------------------------------------
+# METRICS
+# ------------------------------------------------
+c1, c2 = st.columns(2)
+c1.metric("Growth Rate 📈", round(avg_growth, 3))
+c2.metric("Lyapunov Exponent 🧮", round(lyapunov, 4))
+
+# ------------------------------------------------
+# STABILITY CLASSIFICATION
+# ------------------------------------------------
+if lyapunov < -0.01:
+    status = "Declining"
+elif -0.01 <= lyapunov <= 0.01:
+    status = "Stable"
+elif 0.01 < lyapunov <= 0.08:
+    status = "Growing"
 else:
-    st.subheader("Raw Data")
-    st.dataframe(df.head(10))
+    status = "Volatile"
+st.metric("System Stability ⚖️", status)
 
-# --- Helper: Clean columns ---
-def clean_columns(df, numeric_cols, required_cols):
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df.dropna(subset=[col for col in required_cols if col in df.columns])
-    return df
+# ------------------------------------------------
+# YEARWISE CASE GRAPH
+# ------------------------------------------------
+st.header("Year-wise Dengue Cases")
+fig_bar = px.bar(
+    data,
+    x="Year",
+    y="Cases",
+    color="Cases",
+    color_continuous_scale=px.colors.sequential.Oranges,
+    labels={"Cases":"Number of Cases","Year":"Year"}
+)
+fig_bar.update_layout(template="plotly_white", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+st.plotly_chart(fig_bar, use_container_width=True)
 
-# --- Scatter Plot: Lyapunov vs Growth ---
-scatter_cols = ["growth", "lyap_all", "Region", "Year", "Cases"]
-df_scatter = clean_columns(df, ["growth", "lyap_all"], scatter_cols)
+# ------------------------------------------------
+# ROLLING TREND
+# ------------------------------------------------
+st.header("Smoothed Outbreak Trend")
+data["rolling"] = data["Cases"].rolling(3).mean()
+fig_trend = go.Figure()
+fig_trend.add_trace(go.Scatter(
+    x=data["Year"],
+    y=data["Cases"],
+    mode="lines+markers",
+    name="Actual Cases",
+    line=dict(color="#a0522d")  # sienna brown
+))
+fig_trend.add_trace(go.Scatter(
+    x=data["Year"],
+    y=data["rolling"],
+    mode="lines",
+    name="3-Year Moving Avg",
+    line=dict(color="#5c3d2e", width=4)  # dark brown
+))
+fig_trend.update_layout(template="plotly_white", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+st.plotly_chart(fig_trend, use_container_width=True)
 
-if not df_scatter.empty:
-    fig_scatter = px.scatter(
-        df_scatter,
-        x="growth",
-        y="lyap_all",
-        color="Region" if "Region" in df_scatter.columns else None,
-        hover_data=[col for col in ["Year", "Cases"] if col in df_scatter.columns],
-        title="Lyapunov vs Growth Rate Across Regions"
-    )
-    st.plotly_chart(fig_scatter, use_container_width=True)
-else:
-    st.warning("Not enough data for scatter plot.")
+# ------------------------------------------------
+# HEATMAP
+# ------------------------------------------------
+st.header("Dengue Outbreak Heatmap")
+heatmap_df = df.pivot_table(
+    index="Region",
+    columns="Year",
+    values="Cases",
+    aggfunc="sum"
+)
+fig_heat = px.imshow(
+    heatmap_df,
+    color_continuous_scale=px.colors.sequential.Oranges,
+    aspect="auto",
+    labels=dict(x="Year", y="Region", color="Cases")
+)
+fig_heat.update_layout(height=700, template="plotly_white", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+st.plotly_chart(fig_heat, use_container_width=True)
 
-# --- Heatmap: Lyapunov values by Region and Year ---
-heatmap_cols = ["Region", "Year", "lyap_all"]
-df_heatmap = df[heatmap_cols].copy()
-df_heatmap = df_heatmap.dropna()
+# ------------------------------------------------
+# MONTE CARLO SIMULATION
+# ------------------------------------------------
+st.header("Monte Carlo Outbreak Simulation")
+st.latex(r"Cases_{t+1}=Cases_t(1+G+\epsilon)")
 
-if not df_heatmap.empty:
-    heatmap_data = df_heatmap.pivot_table(
-        index="Region", columns="Year", values="lyap_all", aggfunc="mean"
-    )
-    fig_heatmap = go.Figure(data=go.Heatmap(
-        z=heatmap_data.values,
-        x=heatmap_data.columns,
-        y=heatmap_data.index,
-        colorscale="Viridis"
-    ))
-    fig_heatmap.update_layout(title="Lyapunov Heatmap by Region and Year")
-    st.plotly_chart(fig_heatmap, use_container_width=True)
-else:
-    st.warning("Not enough data for heatmap.")
+last_cases = data["Cases"].iloc[-1]
+last_year = int(data["Year"].max())
+future_years = 5
+years = list(range(last_year + 1, last_year + future_years + 1))
+paths = []
 
-# --- Additional charts (example: growth over years) ---
-line_cols = ["Year", "growth", "Region"]
-df_line = clean_columns(df, ["growth"], line_cols)
+for s in range(simulations):
+    current = last_cases
+    path = []
+    for y in years:
+        noise = np.random.normal(0, noise_std)
+        current = current * (1 + avg_growth + noise)
+        path.append(current)
+    paths.append(path)
 
-if not df_line.empty:
-    fig_line = px.line(
-        df_line,
-        x="Year",
-        y="growth",
-        color="Region" if "Region" in df_line.columns else None,
-        title="Growth Rate Over Years by Region",
-        markers=True
-    )
-    st.plotly_chart(fig_line, use_container_width=True)
-else:
-    st.warning("Not enough data for line chart.")
+paths = np.array(paths)
+mean_path = paths.mean(axis=0)
+upper = np.percentile(paths, 95, axis=0)
+lower = np.percentile(paths, 5, axis=0)
 
-# --- Footer ---
-st.markdown("---")
-st.markdown("Dashboard created by Aabha K. | Dengue Risk Analysis")
+fig_sim = go.Figure()
+fig_sim.add_trace(go.Scatter(x=years, y=upper, line=dict(width=0), showlegend=False))
+fig_sim.add_trace(go.Scatter(
+    x=years,
+    y=lower,
+    fill="tonexty",
+    fillcolor="rgba(255,165,0,0.2)",  # soft orange
+    line=dict(width=0),
+    name="Uncertainty"
+))
+fig_sim.add_trace(go.Scatter(
+    x=years,
+    y=mean_path,
+    mode="lines+markers",
+    line=dict(color="#a0522d", width=4),
+    name="Expected Cases"
+))
+fig_sim.update_layout(
+    template="plotly_white",
+    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)",
+    xaxis_title="Year",
+    yaxis_title="Predicted Cases"
+)
+st.plotly_chart(fig_sim, use_container_width=True)
+
+# ------------------------------------------------
+# FUTURE PREDICTION
+# ------------------------------------------------
+st.header("Future Growth Prediction")
+future = []
+current = last_cases
+for i in range(1, 6):
+    current = current * (1 + avg_growth)
+    future.append({"Year": last_year + i, "Cases": current})
+
+future_df = pd.DataFrame(future)
+combined = pd.concat([data[["Year", "Cases"]], future_df])
+combined["Type"] = ["Actual"] * len(data) + ["Predicted"] * len(future_df)
+
+fig_pred = px.line(
+    combined,
+    x="Year",
+    y="Cases",
+    color="Type",
+    markers=True,
+    color_discrete_map={"Actual":"#a0522d","Predicted":"#deb887"}  # sienna & burlywood
+)
+fig_pred.update_layout(template="plotly_white", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+st.plotly_chart(fig_pred, use_container_width=True)
+
+# ------------------------------------------------
+# DATASET
+# ------------------------------------------------
+st.header("Dataset")
+def style_earthy(df):
+    return df.style.set_properties(**{
+        'background-color': '#f5e9d4',  # light brown
+        'color': '#5c3d2e',             # dark brown text
+    })
+st.dataframe(style_earthy(data))
+
+# ------------------------------------------------
+# DICE SIMULATOR SECTION
+# ------------------------------------------------
+st.header("Stochastic Demo: Dice Rolls")
+st.markdown("Each dice roll is a random event. This illustrates how randomness affects dengue case predictions.")
+
+num_rolls = st.slider("Number of Dice Rolls", 10, 200, 50)
+dice = np.random.randint(1,7,size=num_rolls)
+
+fig_dice = px.histogram(dice, nbins=6, range_x=[0.5,6.5],
+                        color_discrete_sequence=['#a0522d'])
+fig_dice.update_layout(
+    title="Dice Roll Distribution",
+    xaxis_title="Dice Face",
+    yaxis_title="Frequency",
+    template="plotly_white",
+    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)"
+)
+st.plotly_chart(fig_dice, use_container_width=True)
