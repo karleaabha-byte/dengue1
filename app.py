@@ -10,7 +10,7 @@ st.title("Dengue Risk Analysis Dashboard")
 
 # --- Load dataset ---
 @st.cache_data
-def load_data(path="dengue_data.csv"):
+def load_data(path="clean_dengue_india_regions2.csv"):
     try:
         df = pd.read_csv(path)
     except Exception as e:
